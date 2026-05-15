@@ -30,11 +30,28 @@
   const STORAGE_KEY = 'aulumByfestData_v2';
   const ROUND_SECONDS = 60;
   const canvas = document.getElementById('game'); const ctx = canvas.getContext('2d'); const ui = document.getElementById('ui');
-  const logo = new Image(); let logoLoaded=false; logo.src='AulumByfestLogo.png'; logo.onload=()=>logoLoaded=true;
+  const ASSET_FILES = {
+    logo: 'AulumByfestLogo.png',
+    castle: 'hoppeborg.png',
+    boyIdle: 'dreng_idle.png',
+    boyJump: 'dreng_jump.png',
+    girlIdle: 'pige_idle.png',
+    girlJump: 'pige_jump.png',
+    coin: 'coin.png',
+    plate: 'plate.png',
+    sausage: 'sausage.png'
+  };
+  const assets = Object.fromEntries(Object.entries(ASSET_FILES).map(([k, src]) => { const img = new Image(); img.src = src; return [k, img]; }));
+  const drawAsset = (name, x, y, w, h, fallbackFn) => {
+    const img = assets[name];
+    if (img && img.complete && img.naturalWidth > 0) ctx.drawImage(img, x, y, w, h);
+    else if (typeof fallbackFn === 'function') fallbackFn();
+  };
+
   const audioCtx = new (window.AudioContext||window.webkitAudioContext)();
   const beep=(type='sine',f=440,d=0.08,v=0.03)=>{const o=audioCtx.createOscillator(),g=audioCtx.createGain();o.type=type;o.frequency.value=f;g.gain.value=v;o.connect(g);g.connect(audioCtx.destination);o.start();g.gain.exponentialRampToValueAtTime(0.0001,audioCtx.currentTime+d);o.stop(audioCtx.currentTime+d)};
 
-  const game = {state:GAME_STATES.START,players:[],currentPlayerId:null,leaderboard:[],lastResult:null,input:{left:false,right:false,jump:false,jumpPressed:false},time:0,popups:[],events:[],shake:0,player:null,coins:[],powerups:[],obstacles:[],difficulty:1,spawnTimers:{coin:0,power:0,obs:0,fries:0,balloon:0}};
+  const game = {state:GAME_STATES.START,players:[],currentPlayerId:null,leaderboard:[],lastResult:null,input:{left:false,right:false,jump:false,jumpPressed:false},time:0,popups:[],events:[],shake:0,player:null,coins:[],powerups:[],obstacles:[],difficulty:1,spawnTimers:{coin:0,power:0,obs:0,fries:0,balloon:0,plate:0}};
   const load=()=>{try{return JSON.parse(localStorage.getItem(STORAGE_KEY))||{players:[],leaderboard:[]}}catch{return{players:[],leaderboard:[]}}};
   const save=()=>localStorage.setItem(STORAGE_KEY,JSON.stringify({players:game.players,leaderboard:game.leaderboard}));
   ({players:game.players,leaderboard:game.leaderboard}=load());
@@ -48,60 +65,77 @@
     if(game.state===GAME_STATES.START){ui.innerHTML=`<h1>🎪 Aulum Byfest: Hoppeborg Challenge</h1><p>Perfekt timing giver de vildeste hop!</p><button class='btn' id='goPlayers'>Start spil</button><button class='btn sec' id='goHigh'>Lokale highscores</button>`; byId('goPlayers').onclick=()=>setState(GAME_STATES.PLAYER_SELECT); byId('goHigh').onclick=()=>setState(GAME_STATES.HIGHSCORES);}
     else if(game.state===GAME_STATES.PLAYER_SELECT){ui.innerHTML=`<h2>Vælg spiller</h2>${game.players.map(pl=>`<button class='btn sec pick' data-id='${pl.id}'>${pl.avatar==='pige'?'👧':'👦'} ${pl.name} • 🪙 ${pl.coins} • Rekord ${pl.highScore}</button>`).join('')||'<p>Ingen profiler endnu.</p>'}<input id='newName' placeholder='Nyt spillernavn' maxlength='18'/><select id='avatar'><option value='dreng'>Dreng</option><option value='pige'>Pige</option></select><button class='btn' id='create'>Opret spiller</button><button class='btn alt' id='back'>Tilbage</button>`; ui.querySelectorAll('.pick').forEach(b=>b.onclick=()=>{game.currentPlayerId=b.dataset.id;setState(GAME_STATES.INSTRUCTIONS)}); byId('create').onclick=()=>{const n=byId('newName').value.trim(); if(!n)return; const pl=defaultPlayer(n,byId('avatar').value); game.players.push(pl); game.currentPlayerId=pl.id; save(); setState(GAME_STATES.INSTRUCTIONS)}; byId('back').onclick=()=>setState(GAME_STATES.START);}
     else if(game.state===GAME_STATES.INSTRUCTIONS){ui.innerHTML=`<h2>Hej ${p?.name||''}!</h2><p><strong>Timing-hop:</strong> Tryk SPACE/↑ lige før landing for bonushop og combo.</p><ul><li>Perfekt: højere hop, bonuspoint, combo ++</li><li>Godt: mindre boost</li><li>Dårligt: combo nulstilles</li><li>Sværhedsgrad stiger hvert 15. sekund</li></ul><button class='btn' id='play'>Start runde (60 sek)</button><button class='btn sec' id='shop'>Upgrade-shop</button><button class='btn alt' id='players'>Skift spiller</button>`; byId('play').onclick=startRound; byId('shop').onclick=()=>setState(GAME_STATES.SHOP); byId('players').onclick=()=>setState(GAME_STATES.PLAYER_SELECT);}
-    else if(game.state===GAME_STATES.SHOP){const up=p.upgrades; const price=k=>Math.floor(20*Math.pow(1.65,up[k]-1)); const names={jump:'Hoppekraft',balance:'Balance',speed:'Fart',magnet:'Magnet',shield:'Skjold'}; const desc={jump:'Større effekt af gode/perfekte timing-hop.',balance:'Gør timing-vinduet større til perfekte hop.',speed:'Bedre sidebevægelse og kontrol i kaos.',magnet:'Trækker mønter ind, især ved høje hop.',shield:'Beskytter mod pølser, pommes og balloner.'}; ui.innerHTML=`<h2>Upgrade-shop</h2><p>Mønter: <strong>${p.coins}</strong></p>${Object.keys(names).map(k=>`<p><span class='pill'>${names[k]} Lv ${up[k]}</span><br><span class='small'>${desc[k]}</span><br>Pris: ${price(k)} 🪙 <button class='btn sec buy' data-k='${k}' style='width:auto;padding:6px 10px;margin:0'>Køb</button></p>`).join('')}<button class='btn' id='toPlay'>Til spil</button>`; ui.querySelectorAll('.buy').forEach(b=>b.onclick=()=>{const k=b.dataset.k,c=price(k); if(p.coins>=c){p.coins-=c;p.upgrades[k]++;save();renderUI();beep('triangle',760,0.1)}}); byId('toPlay').onclick=()=>setState(GAME_STATES.INSTRUCTIONS);}
+    else if(game.state===GAME_STATES.SHOP){const up=p.upgrades; const price=k=>Math.floor(20*Math.pow(1.65,up[k]-1)); const names={jump:'Hoppekraft',balance:'Balance',speed:'Fart',magnet:'Magnet',shield:'Skjold'}; const desc={jump:'Større effekt af gode/perfekte timing-hop.',balance:'Gør timing-vinduet større til perfekte hop.',speed:'Bedre sidebevægelse og kontrol i kaos.',magnet:'Trækker mønter ind, især ved høje hop.',shield:'Beskytter mod pølser, tallerkner, pommes og balloner.'}; ui.innerHTML=`<h2>Upgrade-shop</h2><p>Mønter: <strong>${p.coins}</strong></p>${Object.keys(names).map(k=>`<p><span class='pill'>${names[k]} Lv ${up[k]}</span><br><span class='small'>${desc[k]}</span><br>Pris: ${price(k)} 🪙 <button class='btn sec buy' data-k='${k}' style='width:auto;padding:6px 10px;margin:0'>Køb</button></p>`).join('')}<button class='btn' id='toPlay'>Til spil</button>`; ui.querySelectorAll('.buy').forEach(b=>b.onclick=()=>{const k=b.dataset.k,c=price(k); if(p.coins>=c){p.coins-=c;p.upgrades[k]++;save();renderUI();beep('triangle',760,0.1)}}); byId('toPlay').onclick=()=>setState(GAME_STATES.INSTRUCTIONS);}
     else if(game.state===GAME_STATES.RESULTS){const r=game.lastResult; ui.innerHTML=`<h2>Resultat 🏁</h2><p>Score: <strong>${r.score}</strong><br>Optjente mønter: <strong>${r.coinsEarned}</strong><br>Din rekord: <strong>${r.highScore}</strong><br>Placering: <strong>#${r.rank}</strong></p><div class='row'><button class='btn' id='again'>Spil igen</button><button class='btn sec' id='shop'>Shop</button></div><button class='btn alt' id='high'>Se highscores</button>`; byId('again').onclick=startRound; byId('shop').onclick=()=>setState(GAME_STATES.SHOP); byId('high').onclick=()=>setState(GAME_STATES.HIGHSCORES);}
     else if(game.state===GAME_STATES.HIGHSCORES){const top=[...game.leaderboard].sort((a,b)=>b.score-a.score).slice(0,10); ui.innerHTML=`<h2>Lokale highscores</h2>${top.map((t,i)=>`<p>${i+1}. <strong>${t.name}</strong> - ${t.score}</p>`).join('')||'<p>Ingen scores endnu.</p>'}<button class='btn' id='back'>Tilbage</button>`; byId('back').onclick=()=>setState(p?GAME_STATES.INSTRUCTIONS:GAME_STATES.START);}
   }
 
-  function startRound(){const p=getPlayer(); if(!p)return setState(GAME_STATES.PLAYER_SELECT); game.player={x:600,y:500,vx:0,vy:0,r:24,shield:0,magnet:0,double:0,bouncePower:1,combo:0,lastLanding:0,air:0,anim:0}; game.time=ROUND_SECONDS; game.score=0; game.roundCoins=0; game.coins=[]; game.powerups=[]; game.obstacles=[]; game.popups=[]; game.difficulty=1; game.spawnTimers={coin:0,power:3,obs:1,fries:2,balloon:2}; setState(GAME_STATES.PLAYING);}
+  function startRound(){const p=getPlayer(); if(!p)return setState(GAME_STATES.PLAYER_SELECT); game.player={x:600,y:500,vx:0,vy:0,r:24,shield:0,magnet:0,double:0,bouncePower:1,combo:0,lastLanding:0,air:0,anim:0,spriteWidth:64,spriteHeight:86}; game.time=ROUND_SECONDS; game.score=0; game.roundCoins=0; game.coins=[]; game.powerups=[]; game.obstacles=[]; game.popups=[]; game.difficulty=1; game.spawnTimers={coin:0,power:3,obs:1,fries:2,balloon:2,plate:1.6}; setState(GAME_STATES.PLAYING);}
   function addScore(n,txt=''){game.score=Math.max(0,Math.round((game.score||0)+n)); if(txt)game.popups.push({x:game.player.x,y:game.player.y-40,txt,t:0.9});}
 
   function update(dt){ if(game.state!==GAME_STATES.PLAYING) return; game.time-=dt; if(game.time<=0)return finishRound(); const pl=game.player,prof=getPlayer(); game.difficulty=1+Math.floor((ROUND_SECONDS-game.time)/15);
     if(Math.random()<0.002*game.difficulty){game.shake=0.7;game.events.push({txt:'🚜 Traktor-rystelse!',t:1.1});beep('sawtooth',110,0.2)} if(game.shake>0)game.shake-=dt;
-    const move=(280+prof.upgrades.speed*26); if(game.input.left)pl.vx-=move*dt; if(game.input.right)pl.vx+=move*dt; pl.vx*=0.9; pl.vx=Math.max(-320,Math.min(320,pl.vx));
+    const move=(420+prof.upgrades.speed*35); if(game.input.left)pl.vx-=move*dt; if(game.input.right)pl.vx+=move*dt; pl.vx*=0.84; pl.vx=Math.max(-430,Math.min(430,pl.vx));
     pl.x+=pl.vx*dt; if(pl.x<pl.r){pl.x=pl.r; pl.vx=Math.abs(pl.vx)*0.45; addScore(0,'Blød væg!')} if(pl.x>canvas.width-pl.r){pl.x=canvas.width-pl.r; pl.vx=-Math.abs(pl.vx)*0.45; addScore(0,'Blød væg!')}
     pl.vy+=980*dt; pl.y+=pl.vy*dt; pl.air+=dt; pl.anim+=dt;
-    const floorY=590;
+    const floorY=560;
     const justBeforeLanding = pl.y+pl.r>floorY-26 && pl.vy>120;
     if(game.input.jumpPressed){const window=0.07+prof.upgrades.balance*0.012; const delta=Math.abs((performance.now()/1000)-pl.lastLanding); if(justBeforeLanding || delta<window){const near=delta<window*1.6 || justBeforeLanding; const perfect=delta<window; if(perfect){pl.combo++; pl.bouncePower=Math.min(4.2,pl.bouncePower+0.34+prof.upgrades.jump*0.06); addScore(60+pl.combo*20,'Perfekt hop!'); if(pl.combo%3===0)addScore(30,'Kæmpe hop!'); if(pl.combo%5===0)addScore(40,'Byfest-bounce!'); beep('square',920,0.09);} else if(near){pl.bouncePower=Math.min(3.5,pl.bouncePower+0.16+prof.upgrades.jump*0.04); addScore(25,'Godt hop!'); beep('triangle',760,0.08);} else {pl.combo=0; pl.bouncePower=Math.max(1,pl.bouncePower-0.15); addScore(0,'Mistet timing');} } else {pl.combo=0; addScore(0,'For tidligt!');} }
     game.input.jumpPressed=false;
-    if(pl.y+pl.r>=floorY){pl.y=floorY-pl.r; pl.lastLanding=performance.now()/1000; const base=-(500+prof.upgrades.jump*30); pl.vy=base*pl.bouncePower; if(pl.bouncePower>2.2)addScore(Math.floor(pl.bouncePower*8),'Hoppeborgs-mester!'); pl.bouncePower=Math.max(1,pl.bouncePower*0.96);}    
+    if(pl.y+pl.r>=floorY){pl.y=floorY-pl.r; pl.lastLanding=performance.now()/1000; const base=-(500+prof.upgrades.jump*30); pl.vy=base*pl.bouncePower; if(pl.bouncePower>2.2)addScore(Math.floor(pl.bouncePower*8),'Hoppeborgs-mester!'); pl.bouncePower=Math.max(1,pl.bouncePower*0.96);}
+    if(pl.y - pl.spriteHeight < 0 || pl.y < 55){pl.y=55; pl.vy=Math.max(pl.vy,120);}    
     pl.shield=Math.max(0,pl.shield-dt); pl.magnet=Math.max(0,pl.magnet-dt);
-    spawnAndMove(dt); handleCollisions(prof); game.popups=game.popups.filter(p=>(p.t-=dt)>0); game.events=game.events.filter(e=>(e.t-=dt)>0); addScore(dt*(7+pl.combo*1.1)*game.difficulty);
+    spawnAndMove(dt); handleCollisions(prof,floorY); game.popups=game.popups.filter(p=>(p.t-=dt)>0); game.events=game.events.filter(e=>(e.t-=dt)>0); addScore(dt*(7+pl.combo*1.1)*game.difficulty);
   }
 
-  function spawnAndMove(dt){const sp=game.spawnTimers; sp.coin-=dt; sp.power-=dt; sp.obs-=dt; sp.fries-=dt; sp.balloon-=dt;
+  function spawnAndMove(dt){const sp=game.spawnTimers; sp.coin-=dt; sp.power-=dt; sp.obs-=dt; sp.fries-=dt; sp.balloon-=dt; sp.plate-=dt;
     if(sp.coin<=0){const high=130+Math.random()*Math.max(420,520-game.player.combo*15); game.coins.push({x:50+Math.random()*1100,y:high,r:10,bonus:high<240}); sp.coin=Math.max(0.18,0.5-game.difficulty*0.05);}
     if(sp.power<=0){const types=['shield','magnet']; game.powerups.push({x:80+Math.random()*1040,y:150+Math.random()*350,r:12,type:types[(Math.random()*types.length)|0]}); sp.power=6-Math.min(2.2,game.difficulty*0.5);}
-    if(sp.obs<=0){game.obstacles.push({type:'sausage',x:Math.random()<0.5?-30:1230,y:200+Math.random()*320,vx:(Math.random()<0.5?1:-1)*(130+game.difficulty*42),r:18}); sp.obs=Math.max(0.6,1.7-game.difficulty*0.18);}
+    if(sp.obs<=0){game.obstacles.push({type:'sausage',x:Math.random()<0.5?-40:1240,y:200+Math.random()*320,vx:(Math.random()<0.5?1:-1)*(130+game.difficulty*42),r:24,rot:0}); sp.obs=Math.max(0.6,1.7-game.difficulty*0.18);}
+    if(sp.plate<=0 && game.difficulty>=2){const direction = Math.random() < 0.5 ? 1 : -1; game.obstacles.push({type:'plate',x:direction>0?-50:1250,y:120+Math.random()*260,vx:direction*(230+game.difficulty*45),r:24,rot:0}); sp.plate=Math.max(0.7,1.8-game.difficulty*0.14);}
     if(sp.fries<=0){game.obstacles.push({type:'fries',x:40+Math.random()*1120,y:-20,vy:170+game.difficulty*65,r:14}); sp.fries=Math.max(0.45,1.2-game.difficulty*0.11);}    
     if(sp.balloon<=0){game.obstacles.push({type:'balloon',x:Math.random()<0.5?-25:1225,y:90+Math.random()*300,vx:(Math.random()<0.5?1:-1)*(90+game.difficulty*22),r:16}); sp.balloon=Math.max(0.85,2.4-game.difficulty*0.2);}    
-    game.obstacles.forEach(o=>{if(o.type==='fries')o.y+=o.vy*dt; else o.x+=o.vx*dt;}); game.obstacles=game.obstacles.filter(o=>o.x>-100&&o.x<1300&&o.y<800);
+    game.obstacles.forEach(o=>{if(o.type==='fries')o.y+=o.vy*dt; else{o.x+=o.vx*dt; if(o.type==='plate')o.rot+=dt*6*Math.sign(o.vx); if(o.type==='sausage')o.rot+=dt*1.2*Math.sign(o.vx);}}); game.obstacles=game.obstacles.filter(o=>o.x>-120&&o.x<1320&&o.y<800);
   }
-  function handleCollisions(prof){const pl=game.player; const mr=prof.upgrades.magnet*24 + (pl.magnet>0?135:0);
-    game.coins=game.coins.filter(c=>{const dx=c.x-pl.x,dy=c.y-pl.y,d=Math.hypot(dx,dy); if(d<mr&&d>1){c.x-=dx/d*3;c.y-=dy/d*3;} if(d<pl.r+c.r){game.roundCoins++; const heightBonus=Math.max(0,Math.floor((590-pl.y)*0.08)); addScore((c.bonus?50:25)+heightBonus,'Mønt!'); return false;} return true;});
+  function handleCollisions(prof,floorY){const pl=game.player; const mr=prof.upgrades.magnet*24 + (pl.magnet>0?135:0);
+    game.coins=game.coins.filter(c=>{const dx=c.x-pl.x,dy=c.y-pl.y,d=Math.hypot(dx,dy); if(d<mr&&d>1){c.x-=dx/d*3;c.y-=dy/d*3;} if(d<pl.r+c.r){game.roundCoins++; const heightBonus=Math.max(0,Math.floor((floorY-pl.y)*0.08)); addScore((c.bonus?50:25)+heightBonus,'Mønt!'); return false;} return true;});
     game.powerups=game.powerups.filter(p=>{if(Math.hypot(p.x-pl.x,p.y-pl.y)<pl.r+p.r){if(p.type==='shield')pl.shield=5+prof.upgrades.shield*0.8; if(p.type==='magnet')pl.magnet=8; addScore(80,p.type==='shield'?'Skjold!':'Magnet!'); return false;} return true;});
-    for(const o of game.obstacles){if(Math.hypot(o.x-pl.x,o.y-pl.y)<pl.r+o.r){if(pl.shield>0){pl.shield=0; addScore(35,'Skjold reddede dig!'); continue;} pl.vx+=(o.type==='sausage'?(o.vx>0?230:-230):(Math.random()<.5?-180:180))/(prof.upgrades.balance*0.75); pl.vy-=130; pl.combo=0; addScore(-30,o.type==='sausage'?'Av, en flyvende pølse!':'Av!'); beep('sawtooth',160,0.1);}}
+    for(const o of game.obstacles){if(Math.hypot(o.x-pl.x,o.y-pl.y)<pl.r+o.r){if(pl.shield>0){pl.shield=0; addScore(35,'Skjold reddede dig!'); continue;} if(o.type==='sausage' || o.type==='plate'){addScore(-30,'AV!'); pl.combo=0; pl.bouncePower=1; pl.vy=Math.max(pl.vy,620); pl.vx+=(pl.x>=o.x?130:-130)/Math.max(1,prof.upgrades.balance*0.8); beep('sawtooth',160,0.1);} else {pl.vx+=(Math.random()<.5?-180:180)/(prof.upgrades.balance*0.75); pl.vy=Math.max(pl.vy,520); pl.combo=0; addScore(-20,'Av!'); beep('sawtooth',180,0.08);}}}
   }
 
   function finishRound(){const p=getPlayer(); p.gamesPlayed++; p.coins+=game.roundCoins; if(game.score>p.highScore)p.highScore=game.score; game.leaderboard.push({name:p.name,score:game.score,date:new Date().toISOString(),playerId:p.id}); game.leaderboard=game.leaderboard.sort((a,b)=>b.score-a.score).slice(0,100); const rank=game.leaderboard.findIndex(s=>s.name===p.name&&s.score===game.score)+1; game.lastResult={score:game.score,coinsEarned:game.roundCoins,highScore:p.highScore,rank}; save(); setState(GAME_STATES.RESULTS);}
 
-  function drawPlayer(pl,p){ctx.save(); ctx.translate(pl.x,pl.y); const bounce=Math.sin(pl.anim*16)*Math.min(8,Math.abs(pl.vy)*0.012); ctx.translate(0,bounce);
-    ctx.fillStyle=p.avatar==='pige'?'#f9a8d4':'#93c5fd'; ctx.fillRect(-13,-8,26,28); ctx.fillStyle='#fcd7b6'; ctx.beginPath(); ctx.arc(0,-25,14,0,Math.PI*2); ctx.fill();
-    ctx.strokeStyle='#111827'; ctx.lineWidth=3; ctx.beginPath(); ctx.moveTo(-10,3); ctx.lineTo(-18,14+Math.sin(pl.anim*10)*3); ctx.moveTo(10,3); ctx.lineTo(18,14-Math.sin(pl.anim*10)*3); ctx.moveTo(-6,20); ctx.lineTo(-8,34+Math.abs(Math.sin(pl.anim*8))*4); ctx.moveTo(6,20); ctx.lineTo(8,34+Math.abs(Math.sin(pl.anim*8+1))*4); ctx.stroke();
-    ctx.fillStyle=p.avatar==='pige'?'#7e22ce':'#111827'; ctx.beginPath(); if(p.avatar==='pige'){ctx.arc(0,-30,16,Math.PI,0); ctx.fillRect(-15,-30,6,18); ctx.fillRect(9,-30,6,18);} else {ctx.ellipse(0,-31,15,10,0,0,Math.PI*2);} ctx.fill();
-    if(pl.shield>0){ctx.strokeStyle='rgba(96,165,250,.7)';ctx.lineWidth=4;ctx.beginPath();ctx.arc(0,0,34,0,Math.PI*2);ctx.stroke();}
-    ctx.restore();}
+  function drawPlayer(pl,p){
+    const isJumping = Math.abs(pl.vy) > 120 || pl.y < 530;
+    const spriteName = p.avatar === 'pige' ? (isJumping ? 'girlJump' : 'girlIdle') : (isJumping ? 'boyJump' : 'boyIdle');
+    const spriteWidth = pl.spriteWidth;
+    const spriteHeight = pl.spriteHeight;
+    const drawX = pl.x - spriteWidth / 2;
+    const drawY = pl.y - spriteHeight + 28;
+    drawAsset(spriteName, drawX, drawY, spriteWidth, spriteHeight, () => {
+      ctx.fillStyle=p.avatar==='pige'?'#f9a8d4':'#93c5fd';
+      ctx.fillRect(drawX + 16,drawY + 24,32,44);
+      ctx.fillStyle='#fcd7b6';
+      ctx.beginPath(); ctx.arc(pl.x,drawY + 18,14,0,Math.PI*2); ctx.fill();
+    });
+    if(pl.shield>0){ctx.strokeStyle='rgba(96,165,250,.7)';ctx.lineWidth=4;ctx.beginPath();ctx.arc(pl.x,pl.y,34,0,Math.PI*2);ctx.stroke();}
+  }
 
   function draw(){const s=game.shake>0?6:0,ox=s?Math.sin(performance.now()*0.03)*s:0,oy=s?Math.cos(performance.now()*0.028)*s:0; ctx.save(); ctx.translate(ox,oy); ctx.clearRect(-20,-20,canvas.width+40,canvas.height+40);
     const grad=ctx.createLinearGradient(0,0,0,720); grad.addColorStop(0,'#8be9ff'); grad.addColorStop(1,'#fef9c3'); ctx.fillStyle=grad; ctx.fillRect(0,0,1200,720); drawClouds(); drawCastle();
     if(game.state===GAME_STATES.PLAYING) drawPlaying(); else drawScreenTitle(); ctx.restore();}
-  function drawScreenTitle(){ctx.fillStyle='rgba(0,0,0,.2)';ctx.fillRect(0,0,1200,720); if(logoLoaded){ctx.drawImage(logo,140,120,920,255);} ctx.fillStyle='#fff';ctx.font='bold 58px Trebuchet MS';ctx.fillText('Hoppeborg Challenge',315,465);}
+  function drawScreenTitle(){ctx.fillStyle='rgba(0,0,0,.2)';ctx.fillRect(0,0,1200,720); drawAsset('logo',140,120,920,255,()=>{ctx.fillStyle='#fff';ctx.font='bold 72px Trebuchet MS';ctx.fillText('Aulum Byfest',320,260);}); ctx.fillStyle='#fff';ctx.font='bold 58px Trebuchet MS';ctx.fillText('Hoppeborg Challenge',315,465);}
   function drawClouds(){ctx.fillStyle='rgba(255,255,255,.8)'; for(let i=0;i<7;i++){const x=(performance.now()*0.01*(i+1)+i*190)%1280-90,y=55+i*23;ctx.beginPath();ctx.arc(x,y,24,0,Math.PI*2);ctx.arc(x+24,y+3,20,0,Math.PI*2);ctx.arc(x-24,y+4,18,0,Math.PI*2);ctx.fill();}}
-  function drawCastle(){ctx.fillStyle='#f97316';ctx.fillRect(120,590,960,82);ctx.fillStyle='#fb7185';ctx.fillRect(120,566,960,24);for(let i=0;i<10;i++){ctx.fillStyle=i%2?'#fde047':'#22d3ee';ctx.fillRect(134+i*95,570,84,15);} if(logoLoaded)ctx.drawImage(logo,22,14,240,66);}
-  function drawPlaying(){const pl=game.player,p=getPlayer(); game.coins.forEach(c=>{ctx.fillStyle=c.bonus?'#f97316':'#facc15';ctx.beginPath();ctx.arc(c.x,c.y,c.r,0,Math.PI*2);ctx.fill();});
+  function drawCastle(){drawAsset('castle',80,365,1040,310,()=>{ctx.fillStyle='#f97316';ctx.fillRect(120,560,960,112);ctx.fillStyle='#fb7185';ctx.fillRect(120,536,960,24);}); drawAsset('logo',22,14,240,66,()=>{});}
+  function drawPlaying(){const pl=game.player,p=getPlayer();
+    game.coins.forEach(c=>{drawAsset('coin',c.x-19,c.y-19,38,38,()=>{ctx.fillStyle=c.bonus?'#f97316':'#facc15';ctx.beginPath();ctx.arc(c.x,c.y,c.r,0,Math.PI*2);ctx.fill();});});
     game.powerups.forEach(pw=>{ctx.fillStyle={shield:'#22c55e',magnet:'#3b82f6'}[pw.type];ctx.beginPath();ctx.arc(pw.x,pw.y,pw.r,0,Math.PI*2);ctx.fill();});
-    game.obstacles.forEach(o=>{if(o.type==='sausage'){ctx.fillStyle='#b45309';ctx.beginPath();ctx.ellipse(o.x,o.y,22,11,0,0,Math.PI*2);ctx.fill();} if(o.type==='fries'){ctx.fillStyle='#f59e0b';ctx.fillRect(o.x-8,o.y-16,16,18);ctx.fillStyle='#fde68a';for(let i=0;i<4;i++)ctx.fillRect(o.x-7+i*4,o.y-24,3,9);} if(o.type==='balloon'){ctx.fillStyle='#ec4899';ctx.beginPath();ctx.arc(o.x,o.y,o.r,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#7c3aed';ctx.beginPath();ctx.moveTo(o.x,o.y+o.r);ctx.lineTo(o.x,o.y+o.r+16);ctx.stroke();}});
+    game.obstacles.forEach(o=>{
+      if(o.type==='sausage'){ctx.save();ctx.translate(o.x,o.y);ctx.rotate(0.12*Math.sign(o.vx));drawAsset('sausage',-40,-22,80,45,()=>{ctx.fillStyle='#b45309';ctx.beginPath();ctx.ellipse(0,0,22,11,0,0,Math.PI*2);ctx.fill();});ctx.restore();}
+      if(o.type==='plate'){ctx.save();ctx.translate(o.x,o.y);ctx.rotate(o.rot||0);drawAsset('plate',-35,-35,70,70,()=>{ctx.strokeStyle='#6b7280';ctx.lineWidth=4;ctx.beginPath();ctx.arc(0,0,24,0,Math.PI*2);ctx.stroke();});ctx.restore();}
+      if(o.type==='fries'){ctx.fillStyle='#f59e0b';ctx.fillRect(o.x-8,o.y-16,16,18);ctx.fillStyle='#fde68a';for(let i=0;i<4;i++)ctx.fillRect(o.x-7+i*4,o.y-24,3,9);}
+      if(o.type==='balloon'){ctx.fillStyle='#ec4899';ctx.beginPath();ctx.arc(o.x,o.y,o.r,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#7c3aed';ctx.beginPath();ctx.moveTo(o.x,o.y+o.r);ctx.lineTo(o.x,o.y+o.r+16);ctx.stroke();}
+    });
     drawPlayer(pl,p);
     game.popups.forEach(pp=>{ctx.fillStyle='#111827';ctx.font='bold 20px sans-serif';ctx.fillText(pp.txt,pp.x-40,pp.y-(1-pp.t)*25);});
     const meterW=270,comboFill=Math.min(1,pl.combo/12),bounceFill=Math.min(1,(pl.bouncePower-1)/3.2); ctx.fillStyle='rgba(17,24,39,.8)'; ctx.fillRect(20,20,meterW,24); ctx.fillStyle='#22c55e';ctx.fillRect(20,20,meterW*comboFill,24); ctx.fillStyle='#fff';ctx.font='bold 14px sans-serif';ctx.fillText(`Combo: ${pl.combo}`,28,37);
