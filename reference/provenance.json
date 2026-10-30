@@ -1,0 +1,42 @@
+{
+  "code_source": "https://github.com/KenneyLassen/Byfestspillet/blob/main/index.html",
+  "original_code_sha256": "984746e78d4730809e3a23b68c1077d8461f50cd145e64f61c7e7802c5cdcc4f",
+  "assets_source": "https://chatgpt.com/share/6aaa914f-aeb4-83eb-a502-702a855f456f",
+  "assets": {
+    "pige_jump.png": {
+      "bytes": 1303786,
+      "sha256": "655f2c7a948edc5e285f479509f2029959a25ab38cd19149977ac948a81895a0"
+    },
+    "dreng_idle.png": {
+      "bytes": 1165387,
+      "sha256": "a8a578d1a3e41307cc0e456a7415031e02c61baf618294bfa5b8dcccb1c4c659"
+    },
+    "pige_idle.png": {
+      "bytes": 1206292,
+      "sha256": "f523d499517b3b46f0679d670f91bab3b62a67f5ff2cc54cef4d800ff8fbf8fb"
+    },
+    "dreng_jump.png": {
+      "bytes": 1209268,
+      "sha256": "fa53cf3f53af08e2eb1ec5759a1dfc2b902adc46963dd7d76b9e0c673cad98be"
+    },
+    "hoppeborg.png": {
+      "bytes": 1690044,
+      "sha256": "f1b80cd4926bc215b134cf79c730b1a9c952b7b2549bb264535ac04bc80c2760"
+    },
+    "sausage.png": {
+      "bytes": 2317628,
+      "sha256": "db924f9f5c6c926647d51d61c1c13c5bdd93e0b341cbe2f45b88efd32edd2885"
+    },
+    "plate.png": {
+      "bytes": 1371605,
+      "sha256": "86385c44d3475126470ecbd6b087489b4a55cf2685fd485a54183279318afd98"
+    },
+    "coin.png": {
+      "bytes": 2331344,
+      "sha256": "e827588934c377cab1de7715198263ffdb5019209f4cbbc16bb5fa4888f103b8"
+    }
+  },
+  "missing": [
+    "AulumByfestLogo.png"
+  ]
+}

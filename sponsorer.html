@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="da">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#174e48">
+  <title>Sponsorer · Aulum Byfest</title>
+  <script defer src="sponsor-config.js"></script>
+  <script defer src="sponsor-editor.js"></script>
+  <style>
+    :root{font-family:"Trebuchet MS",Arial,sans-serif;color:#174e48;background:#fffaec;font-synthesis:none}
+    *{box-sizing:border-box}body{margin:0}main{max-width:1120px;margin:auto;padding:32px 24px 50px}
+    header{display:flex;justify-content:space-between;gap:20px;align-items:start;margin-bottom:24px}
+    .eyebrow{font-size:11px;font-weight:bold;letter-spacing:2px;color:#3e7d6e;margin:0 0 10px}
+    h1{font-size:clamp(28px,5vw,42px);letter-spacing:-1px;line-height:1.1;margin:0 0 12px}
+    h2{font-size:23px;margin:0 0 18px}h3{margin:0;font-size:17px;overflow-wrap:anywhere}p{line-height:1.6}
+    a{color:inherit}.back{font-size:13px;white-space:nowrap;padding-top:8px}
+    .intro{max-width:720px;margin:0;color:#526f64}.notice{border-left:4px solid #df8741;padding:12px 18px;background:#f8edce;border-radius:0 12px 12px 0;margin-bottom:24px}
+    .notice p{margin:0;font-size:14px}.layout{display:grid;grid-template-columns:minmax(260px,330px) minmax(0,1fr);gap:24px;align-items:start}
+    .panel{background:#fffdf5;border:1px solid #174e4833;border-radius:18px;padding:22px}
+    label{display:block;font-size:14px;font-weight:bold;margin:18px 0 7px}
+    input{display:block;width:100%;border:1px solid #174e4855;border-radius:9px;padding:11px 12px;color:#174e48;background:white;font:inherit}
+    input[type=file]{padding:9px;font-size:12px}input:focus-visible,button:focus-visible,a:focus-visible{outline:3px solid #e98e40;outline-offset:3px}
+    .hint{color:#617a71;font-size:12px;line-height:1.5;margin:8px 0 14px}.actions{display:flex;gap:9px;flex-wrap:wrap}
+    button{border:0;border-radius:10px;padding:11px 15px;background:#174e48;color:white;font:700 14px "Trebuchet MS",Arial,sans-serif;cursor:pointer}
+    button:hover{background:#26695f}button:disabled{cursor:default;opacity:.45}.secondary{background:#fbd25e;color:#174e48}.secondary:hover{background:#f0c146}
+    .quiet{background:transparent;color:#174e48;border:1px solid #174e4840}.quiet:hover{background:#e8f1dd}.danger{color:#a6402e}
+    .wide{width:100%;margin-top:10px}.toolbar{display:flex;justify-content:space-between;gap:15px;align-items:center;margin-bottom:16px}
+    .toolbar h2{margin:0}.count{font-size:12px;color:#617a71;white-space:nowrap}.sponsor-list{list-style:none;margin:0;padding:0;display:grid;gap:14px}
+    .sponsor-card{border:1px solid #174e4833;border-radius:12px;overflow:hidden;background:#fffdf6}
+    .banner-preview{padding:12px 24px;background:linear-gradient(#f6c54f 0 62%,#129fa9 62% 100%);display:grid;place-items:center;min-height:104px}
+    .logo{width:min(100%,270px);height:72px;background:#fffdf6;border:2px solid #55796b;border-radius:8px;display:grid;place-items:center;padding:9px;box-shadow:0 2px 0 #174e4833;overflow:hidden;text-align:center;font-weight:bold;overflow-wrap:anywhere}
+    .logo img{display:block;width:100%;height:100%;object-fit:contain}.logo span{font-size:16px}.card-info{padding:13px 14px}.card-info .actions{margin-top:12px}
+    .card-info button{font-size:12px;padding:8px 10px}.empty{padding:30px 20px;text-align:center;border:1px dashed #174e4855;border-radius:12px;color:#617a71;line-height:1.6}
+    #status{margin:18px 0 0;min-height:24px;font-size:14px;line-height:1.5}#status[data-error=true]{color:#a6402e}
+    .form-preview{margin-top:14px}.form-preview .logo{height:60px;width:100%}.small-button{margin:10px 0;font-size:12px;padding:8px 10px}
+    [hidden]{display:none!important}
+    @media(max-width:760px){main{padding:22px 16px 35px}header{flex-direction:column;gap:4px}.back{padding:0}.layout{grid-template-columns:1fr}.panel{padding:18px}.toolbar{align-items:start}.notice{padding:12px 14px}}
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div><p class="eyebrow">AULUM BYFEST · SPONSORER</p><h1>Sponsorer til Hop &amp; Rul</h1><p class="intro">Tilføj sponsorbilleder, vælg rækkefølgen, og hent sponsorfilen. På pudernes forsider vises kun billederne.</p></div>
+      <a class="back" href="./">Åbn spillet →</a>
+    </header>
+    <div class="notice"><p>Din kladde bliver kun på denne side. Hent <strong>sponsorer.json</strong>, og læg den i spillets mappe i stedet for filen med samme navn. Udgiv spillet igen, når ændringen skal være synlig for alle. Siden her udgiver ikke noget automatisk.</p></div>
+    <div class="layout">
+      <section class="panel" aria-labelledby="formTitle">
+        <h2 id="formTitle">Tilføj en sponsor</h2>
+        <p id="status" role="status" aria-live="polite">Indlæser den nuværende sponsorfil…</p>
+        <form id="sponsorForm">
+          <label for="sponsorName">Betegnelse (kun i oversigten)</label>
+          <input id="sponsorName" maxlength="60" autocomplete="off" required placeholder="Udfyldes fra billedets filnavn">
+          <label for="sponsorLogo">Sponsor-/bannerbillede</label>
+          <input id="sponsorLogo" type="file" accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp">
+          <p class="hint">Et billede er påkrævet: PNG, JPEG eller WebP, højst 3 MB. Vandrette bannerbilleder fungerer bedst (omkring 6:1). Hele billedet vises uden at blive strakt.</p>
+          <div id="formPreview" class="form-preview" hidden><div class="logo"><img id="formLogo" alt="Valgt sponsorbillede"></div></div>
+          <button type="button" id="removeLogo" class="quiet small-button" hidden>Fjern billede</button>
+          <button type="submit" id="saveSponsor" class="wide">Tilføj sponsor</button>
+          <button type="button" id="cancelEdit" class="quiet wide" hidden>Annuller redigering</button>
+          <p class="hint">Klik Tilføj eller Gem, før du henter sponsorfilen.</p>
+        </form>
+        <hr style="border:0;border-top:1px solid #174e4822;margin:20px 0">
+        <button type="button" id="downloadConfig" class="secondary wide">Hent sponsorfil</button>
+        <button type="button" id="openConfig" class="quiet wide">Åbn en sponsorfil</button>
+        <input type="file" id="configFile" accept="application/json,.json" hidden>
+        <p class="hint">Højst 24 sponsorer og 8 MB i hele filen. En åbnet sponsorfil erstatter listen her på siden. Eksisterende spillere og rekorder påvirkes ikke.</p>
+      </section>
+      <section class="panel" aria-labelledby="listTitle">
+        <div class="toolbar"><h2 id="listTitle">Din sponsorliste</h2><span id="sponsorCount" class="count">0 af 24</span></div>
+        <p class="hint">Rækkefølgen gentages langs banen. Flyt sponsorernes placering med Op og Ned.</p>
+        <p id="emptyState" class="empty">Ingen sponsorbilleder endnu.<br>Spillet viser ingen sponsorbannere, før der er tilføjet billeder.</p>
+        <ul id="sponsorList" class="sponsor-list"></ul>
+      </section>
+    </div>
+  </main>
+</body>
+</html>

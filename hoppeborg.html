@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="da">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Aulum Byfest: Hoppeborg Challenge</title>
+  <style>
+    :root{--bg:#fff6d6;--panel:#ffffff;--primary:#ff6b6b;--secondary:#4ecdc4;--accent:#ffe66d;--text:#1f2937;--ok:#22c55e}
+    *{box-sizing:border-box}
+    body{margin:0;font-family:"Trebuchet MS",Arial,sans-serif;background:linear-gradient(180deg,#8be9ff,#fff7d8);color:var(--text)}
+    #app{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:12px}
+    .layout{width:min(1520px,100%);display:grid;grid-template-columns:minmax(0,1fr) 290px;gap:12px;align-items:start}
+    #game{display:block;width:100%;height:auto;aspect-ratio:1200/720;background:#a7f3d0;border:5px solid #1f2937;border-radius:14px;box-shadow:0 8px 0 #1f2937}
+    .touch-controls{display:flex;gap:10px;margin:18px 0 4px;touch-action:none;user-select:none}
+    .touch-controls[hidden]{display:none}.touch-controls button{min-height:60px;flex:1;touch-action:none}
+    .touch-controls button:last-child{flex:2;background:#6366f1}.touch-controls button[data-ready="true"]{background:#15803d}.touch-controls button:active{transform:translateY(3px);box-shadow:none}
+    .game-area{min-width:0}.status{font-size:.9rem;line-height:1.4}.status:empty{display:none}
+    .btn:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #4f46e5;outline-offset:3px}
+    .panel{background:var(--panel);border:4px solid #1f2937;border-radius:14px;padding:14px;box-shadow:0 6px 0 #1f2937;max-height:calc(100vh - 24px);overflow:auto}
+    h1,h2,h3{margin:.4rem 0} p{line-height:1.35}
+    .btn{width:100%;border:3px solid #1f2937;border-radius:12px;background:var(--primary);color:#fff;padding:11px;font-size:1rem;font-weight:700;cursor:pointer;margin:6px 0;box-shadow:0 4px 0 #1f2937}
+    .btn.sec{background:var(--secondary)} .btn.alt{background:#6366f1}
+    .row{display:flex;gap:8px}.row .btn{margin:0}
+    input,select{width:100%;padding:10px;border:3px solid #1f2937;border-radius:10px;font-size:1rem}
+    .small{font-size:.9rem;opacity:.85}.pill{display:inline-block;background:var(--accent);border:2px solid #1f2937;padding:3px 8px;border-radius:999px;font-weight:700;margin:2px}
+    @media (max-width: 1220px){.layout{grid-template-columns:1fr 260px}}
+    @media (max-width: 980px){.layout{grid-template-columns:1fr}.panel{max-height:none}}
+  </style>
+</head>
+<body>
+<div id="app"><div class="layout"><section class="game-area" aria-label="Spillebane"><canvas id="game" width="1200" height="720" tabindex="0" aria-label="Hoppeborg Challenge. Bevæg med piletaster eller A og D. Hop med pil op eller mellemrum."></canvas><div id="touchControls" class="touch-controls" hidden><button class="btn" data-control="left" aria-label="Venstre">◀</button><button class="btn" data-control="right" aria-label="Højre">▶</button><button id="hopButton" class="btn" data-control="jump" aria-label="Hop">HOP ↑</button></div><p class="status" id="assetStatus" role="status"></p><p class="status" id="saveStatus" role="status"></p></section><aside class="panel" id="ui"></aside></div></div>
+<script>
+(() => {
+  const GAME_STATES = Object.freeze({START:'START',PLAYER_SELECT:'PLAYER_SELECT',INSTRUCTIONS:'INSTRUCTIONS',PLAYING:'PLAYING',RESULTS:'RESULTS',SHOP:'SHOP',HIGHSCORES:'HIGHSCORES'});
+  const STORAGE_KEY = 'aulumByfestData_v2';
+  const ROUND_SECONDS = 60;
+  const canvas = document.getElementById('game'); const ctx = canvas.getContext('2d'); const ui = document.getElementById('ui');
+  const ASSET_FILES = {
+    logo: 'AulumByfestLogo.png',
+    castle: 'hoppeborg.png',
+    boyIdle: 'dreng_idle.png',
+    boyJump: 'dreng_jump.png',
+    girlIdle: 'pige_idle.png',
+    girlJump: 'pige_jump.png',
+    coin: 'coin.png',
+    plate: 'plate.png',
+    sausage: 'sausage.png'
+  };
+  ctx.imageSmoothingEnabled = true;
+  const assets = {}, preparedAssets = {}, assetFailures = new Set();
+  // The downloaded originals remain untouched. Some have a baked-in neutral
+  // checkerboard: mask only connected background pixels in the render cache.
+  function prepareAsset(name, img) {
+    const c = document.createElement('canvas'); c.width=img.naturalWidth; c.height=img.naturalHeight;
+    const cx=c.getContext('2d', {willReadFrequently:true}); cx.drawImage(img,0,0);
+    const pixels=cx.getImageData(0,0,c.width,c.height), data=pixels.data, count=c.width*c.height;
+    if(['castle','boyIdle','boyJump','girlIdle','girlJump','plate'].includes(name)) {
+      const seen=new Uint8Array(count), queue=new Int32Array(count); let tail=0;
+      const visit=i=>{if(i<0||i>=count||seen[i])return;seen[i]=1;const j=i*4;
+        const lo=Math.min(data[j],data[j+1],data[j+2]), hi=Math.max(data[j],data[j+1],data[j+2]);
+        if(data[j+3]<16 || (lo>190 && hi-lo<22)){data[j+3]=0;queue[tail++]=i;}};
+      for(let x=0;x<c.width;x++){visit(x);visit(count-c.width+x);}
+      for(let y=0;y<c.height;y++){visit(y*c.width);visit(y*c.width+c.width-1);}
+      // The opening beneath this castle's arch is enclosed by the artwork.
+      if(name==='castle')visit(Math.floor(c.height*.36)*c.width+Math.floor(c.width*.5));
+      for(let head=0;head<tail;head++){const i=queue[head];if(i%c.width)visit(i-1);if(i%c.width<c.width-1)visit(i+1);visit(i-c.width);visit(i+c.width);}
+      cx.putImageData(pixels,0,0);
+    }
+    let left=c.width,top=c.height,right=-1,bottom=-1;
+    for(let y=0;y<c.height;y++)for(let x=0;x<c.width;x++)if(data[(y*c.width+x)*4+3]>128){left=Math.min(left,x);right=Math.max(right,x);top=Math.min(top,y);bottom=Math.max(bottom,y);}
+    const crop=name==='castle'||name==='logo'||right<left?{x:0,y:0,w:c.width,h:c.height}:{x:left,y:top,w:right-left+1,h:bottom-top+1};
+    return {image:c,...crop};
+  }
+  function assetStatus(){
+    const missing=[...assetFailures].filter(k=>k!=='logo');
+    document.getElementById('assetStatus').textContent=missing.length?'Nogle billeder kunne ikke indlæses. Spillet bruger reservegrafik.':'';
+  }
+  Object.entries(ASSET_FILES).forEach(([name,src])=>{
+    const img=new Image(); assets[name]=img;
+    img.onload=()=>{try{preparedAssets[name]=prepareAsset(name,img);}catch{preparedAssets[name]={image:img,x:0,y:0,w:img.naturalWidth,h:img.naturalHeight};}assetStatus();};
+    img.onerror=()=>{assetFailures.add(name);assetStatus();};img.src=src;
+  });
+  function fitRect(sw,sh,x,y,w,h,alignY=.5){const scale=Math.min(w/sw,h/sh);return{x:x+(w-sw*scale)/2,y:y+(h-sh*scale)*alignY,w:sw*scale,h:sh*scale};}
+  function drawAsset(name,x,y,w,h,fallbackFn,alignY=.5){
+    const img=assets[name], a=preparedAssets[name];
+    if(img&&img.complete&&img.naturalWidth>0){const source=a||{image:img,x:0,y:0,w:img.naturalWidth,h:img.naturalHeight};const r=fitRect(source.w,source.h,x,y,w,h,alignY);ctx.drawImage(source.image,source.x,source.y,source.w,source.h,r.x,r.y,r.w,r.h);}
+    else if(typeof fallbackFn==='function')fallbackFn();
+  }
+  // Coordinates measured on the original 1536×1024 castle. Both collision
+  // and rendering derive from this same transform, so feet meet the surface.
+  function getCastleRect(){return fitRect(1536,1024,80,28,1040,680,1);}
+  function getPlayfield(){const r=getCastleRect();return{floorY:r.y+r.h*(760/1024),left:r.x+r.w*(280/1536)+26,right:r.x+r.w*(1250/1536)-26,top:72-18+12};}
+
+  let audioCtx=null;
+  function unlockAudio(){try{const Audio=window.AudioContext||window.webkitAudioContext;if(!audioCtx&&Audio)audioCtx=new Audio();if(audioCtx?.state==='suspended')audioCtx.resume().catch(()=>{});}catch{}}
+  const beep=(type='sine',f=440,d=0.08,v=0.03)=>{if(!audioCtx)return;const o=audioCtx.createOscillator(),g=audioCtx.createGain();o.type=type;o.frequency.value=f;g.gain.value=v;o.connect(g);g.connect(audioCtx.destination);o.start();g.gain.exponentialRampToValueAtTime(0.0001,audioCtx.currentTime+d);o.stop(audioCtx.currentTime+d)};
+
+  const game = {state:GAME_STATES.START,players:[],currentPlayerId:null,leaderboard:[],lastResult:null,input:{left:false,right:false,jump:false,jumpPressed:false},time:0,popups:[],events:[],shake:0,player:null,coins:[],powerups:[],obstacles:[],difficulty:1,spawnTimers:{coin:0,power:0,obs:0,fries:0,balloon:0,plate:0}};
+  const load=()=>{try{const d=JSON.parse(localStorage.getItem(STORAGE_KEY)||localStorage.getItem('aulumByfestData_v1'));return d&&Array.isArray(d.players)&&Array.isArray(d.leaderboard)?d:{players:[],leaderboard:[]};}catch{return{players:[],leaderboard:[]}}};
+  const save=()=>{try{localStorage.setItem(STORAGE_KEY,JSON.stringify({players:game.players,leaderboard:game.leaderboard}));document.getElementById('saveStatus').textContent='';}catch{document.getElementById('saveStatus').textContent='Browseren kan ikke gemme lige nu. Behold siden åben for at bevare dine resultater.';}};
+  ({players:game.players,leaderboard:game.leaderboard}=load());
+  function defaultPlayer(name,avatar='dreng'){return{id:crypto.randomUUID(),name,avatar,coins:0,highScore:0,upgrades:{jump:1,balance:1,speed:1,magnet:1,shield:1},gamesPlayed:0}};
+  const getPlayer=()=>game.players.find(p=>p.id===game.currentPlayerId);
+  const byId=(id)=>document.getElementById(id);
+  const escapeHTML=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+  function setState(s){game.state=s;resetInput();document.getElementById('touchControls').hidden=s!==GAME_STATES.PLAYING;renderUI();if(s===GAME_STATES.PLAYING){unlockAudio();canvas.focus({preventScroll:true});}}
+  function renderUI(){
+    const p=getPlayer();
+    if(game.state===GAME_STATES.PLAYING){ui.innerHTML=`<h2>${escapeHTML(p.name)}</h2><p><strong>← → / A D</strong> bevæger dig.<br><strong>↑ / mellemrum / HOP</strong> giver ekstra kraft lige før landing.</p><p>Tryk, når HOP-knappen bliver grøn. Slip mellem hvert hop.</p><p>Tid: <strong id='roundTime'>60</strong> sek.<br>Point: <strong id='roundScore'>0</strong><br>Combo: <strong id='roundCombo'>0</strong></p><p class='small'>Mønter og resultat gemmes, når runden er slut.</p>`;return;}
+    if(game.state===GAME_STATES.START){ui.innerHTML=`<h1>🎪 Aulum Byfest: Hoppeborg Challenge</h1><p>Perfekt timing giver de vildeste hop!</p><button class='btn' id='goPlayers'>Start spil</button><button class='btn sec' id='goHigh'>Lokale highscores</button>`; byId('goPlayers').onclick=()=>setState(GAME_STATES.PLAYER_SELECT); byId('goHigh').onclick=()=>setState(GAME_STATES.HIGHSCORES);}
+    else if(game.state===GAME_STATES.PLAYER_SELECT){ui.innerHTML=`<h2>Vælg spiller</h2>${game.players.map(pl=>`<button class='btn sec pick' data-id='${escapeHTML(pl.id)}'>${pl.avatar==='pige'?'👧':'👦'} ${escapeHTML(pl.name)} • 🪙 ${pl.coins} • Rekord ${pl.highScore}</button>`).join('')||'<p>Ingen profiler endnu.</p>'}<label for='newName'>Spillernavn</label><input id='newName' placeholder='Nyt spillernavn' maxlength='18'/><label for='avatar'>Figur</label><select id='avatar'><option value='dreng'>Dreng</option><option value='pige'>Pige</option></select><button class='btn' id='create'>Opret spiller</button><button class='btn alt' id='back'>Tilbage</button>`; ui.querySelectorAll('.pick').forEach(b=>b.onclick=()=>{game.currentPlayerId=b.dataset.id;setState(GAME_STATES.INSTRUCTIONS)}); byId('create').onclick=()=>{const n=byId('newName').value.trim(); if(!n)return; const pl=defaultPlayer(n,byId('avatar').value); game.players.push(pl); game.currentPlayerId=pl.id; save(); setState(GAME_STATES.INSTRUCTIONS)}; byId('back').onclick=()=>setState(GAME_STATES.START);}
+    else if(game.state===GAME_STATES.INSTRUCTIONS){ui.innerHTML=`<h2>Hej ${escapeHTML(p?.name)}!</h2><p><strong>Timing-hop:</strong> Tryk SPACE/↑ lige før landing for bonushop og combo.</p><ul><li>Perfekt: højere hop, bonuspoint, combo ++</li><li>Godt: mindre boost</li><li>Dårligt: combo nulstilles</li><li>Sværhedsgrad stiger hvert 15. sekund</li></ul><button class='btn' id='play'>Start runde (60 sek)</button><button class='btn sec' id='shop'>Upgrade-shop</button><button class='btn alt' id='players'>Skift spiller</button>`; byId('play').onclick=startRound; byId('shop').onclick=()=>setState(GAME_STATES.SHOP); byId('players').onclick=()=>setState(GAME_STATES.PLAYER_SELECT);}
+    else if(game.state===GAME_STATES.SHOP){const up=p.upgrades; const price=k=>Math.floor(20*Math.pow(1.65,up[k]-1)); const names={jump:'Hoppekraft',balance:'Balance',speed:'Fart',magnet:'Magnet',shield:'Skjold'}; const desc={jump:'Større effekt af gode/perfekte timing-hop.',balance:'Gør timing-vinduet større til perfekte hop.',speed:'Bedre sidebevægelse og kontrol i kaos.',magnet:'Trækker mønter ind, især ved høje hop.',shield:'Beskytter mod pølser, tallerkner, pommes og balloner.'}; ui.innerHTML=`<h2>Upgrade-shop</h2><p>Mønter: <strong>${p.coins}</strong></p>${Object.keys(names).map(k=>`<p><span class='pill'>${names[k]} Lv ${up[k]}</span><br><span class='small'>${desc[k]}</span><br>Pris: ${price(k)} 🪙 <button class='btn sec buy' data-k='${k}' style='width:auto;padding:6px 10px;margin:0'>Køb</button></p>`).join('')}<button class='btn' id='toPlay'>Til spil</button>`; ui.querySelectorAll('.buy').forEach(b=>b.onclick=()=>{const k=b.dataset.k,c=price(k); if(p.coins>=c){p.coins-=c;p.upgrades[k]++;save();renderUI();beep('triangle',760,0.1)}}); byId('toPlay').onclick=()=>setState(GAME_STATES.INSTRUCTIONS);}
+    else if(game.state===GAME_STATES.RESULTS){const r=game.lastResult; ui.innerHTML=`<h2>Resultat 🏁</h2><p>Score: <strong>${r.score}</strong><br>Optjente mønter: <strong>${r.coinsEarned}</strong><br>Din rekord: <strong>${r.highScore}</strong><br>Placering: <strong>#${r.rank}</strong></p><div class='row'><button class='btn' id='again'>Spil igen</button><button class='btn sec' id='shop'>Shop</button></div><button class='btn alt' id='high'>Se highscores</button>`; byId('again').onclick=startRound; byId('shop').onclick=()=>setState(GAME_STATES.SHOP); byId('high').onclick=()=>setState(GAME_STATES.HIGHSCORES);}
+    else if(game.state===GAME_STATES.HIGHSCORES){const top=[...game.leaderboard].sort((a,b)=>b.score-a.score).slice(0,10); ui.innerHTML=`<h2>Lokale highscores</h2>${top.map((t,i)=>`<p>${i+1}. <strong>${escapeHTML(t.name)}</strong> - ${t.score}</p>`).join('')||'<p>Ingen scores endnu.</p>'}<button class='btn' id='back'>Tilbage</button>`; byId('back').onclick=()=>setState(p?GAME_STATES.INSTRUCTIONS:GAME_STATES.START);}
+  }
+
+  function startRound(){
+    const profile=getPlayer();
+    if(!profile)return setState(GAME_STATES.PLAYER_SELECT);
+    const field=getPlayfield();
+    game.player={x:(field.left+field.right)/2,y:field.floorY-18,vx:0,vy:0,r:18,
+      shield:0,magnet:0,double:0,bouncePower:1,combo:0,lastLanding:0,air:0,anim:0,
+      spriteWidth:52,spriteHeight:72,pendingJumpAt:null,hitCooldown:0,hurt:0};
+    game.time=ROUND_SECONDS; game.simTime=0; game.score=0; game.roundCoins=0;
+    game.coins=[]; game.powerups=[]; game.obstacles=[]; game.popups=[]; game.events=[]; game.shake=0;
+    game.difficulty=1; game.input.left=false; game.input.right=false; game.input.jump=false; game.input.jumpPressed=false;
+    game.spawnTimers={coin:0,power:3,obs:1,fries:2,balloon:2,plate:1.6};
+    setState(GAME_STATES.PLAYING);
+  }
+  function addScore(n,txt=''){
+    // Keep fractional survival points; rounding every frame loses them on fast displays.
+    game.score=Math.max(0,(game.score||0)+n);
+    if(txt)game.popups.push({x:game.player.x,y:game.player.y-40,txt,t:0.9});
+  }
+  function timingWindows(profile){
+    const balance=Math.min(10,Math.max(1,profile.upgrades.balance));
+    return {perfect:0.075+balance*0.012,good:0.18+balance*0.012};
+  }
+  function timeUntilLanding(player,field){
+    const distance=Math.max(0,field.floorY-player.r-player.y);
+    return (Math.sqrt(player.vy*player.vy+2*980*distance)-player.vy)/980;
+  }
+  function bufferJump(profile,field){
+    const player=game.player;
+    if(!game.input.jumpPressed)return;
+    game.input.jumpPressed=false;
+    // A tap stays buffered until this landing. Repeated taps cannot multiply its reward.
+    if(player.pendingJumpAt!==null || player.hurt>0)return;
+    if(player.vy>0 && timeUntilLanding(player,field)<=timingWindows(profile).good){
+      player.pendingJumpAt=game.simTime;
+    }else{
+      player.combo=0; player.bouncePower=Math.max(1,player.bouncePower-0.15);
+      addScore(0,'For tidligt!');
+    }
+  }
+  function landPlayer(profile,field,landingTime){
+    const player=game.player;
+    if(player.pendingJumpAt!==null){
+      const timing=landingTime-player.pendingJumpAt, windows=timingWindows(profile);
+      if(timing<=windows.perfect+0.001){
+        player.combo++;
+        player.bouncePower=Math.min(4.2,player.bouncePower+0.34+profile.upgrades.jump*0.06);
+        addScore(60+player.combo*20,'Perfekt hop!');
+        if(player.combo%3===0)addScore(30,'Kæmpe hop!');
+        if(player.combo%5===0)addScore(40,'Byfest-bounce!');
+        beep('square',920,0.09);
+      }else if(timing<=windows.good+0.001){
+        player.bouncePower=Math.min(4.2,player.bouncePower+0.16+profile.upgrades.jump*0.04);
+        addScore(25,'Godt hop!'); beep('triangle',760,0.08);
+      }else{
+        player.combo=0; addScore(0,'Mistet timing');
+      }
+    }
+    player.pendingJumpAt=null; player.y=field.floorY-player.r; player.lastLanding=landingTime; player.air=0;
+    const base=500+Math.min(10,profile.upgrades.jump)*30;
+    // Limit the apex using the visible sprite, before launching, rather than losing it above the canvas.
+    const ceilingSpeed=Math.sqrt(2*980*Math.max(0,player.y-field.top-2));
+    player.vy=-Math.min(base*Math.sqrt(1+(player.bouncePower-1)*0.62),ceilingSpeed);
+    if(player.bouncePower>2.2)addScore(Math.floor(player.bouncePower*8),'Hoppeborgs-mester!');
+    player.bouncePower=Math.max(1,player.bouncePower*0.96);
+  }
+  function update(dt){
+    if(game.state!==GAME_STATES.PLAYING || !Number.isFinite(dt) || dt<=0)return;
+    const profile=getPlayer(), field=getPlayfield();
+    bufferJump(profile,field);
+    // Small simulation steps keep landing/collision behaviour stable across display refresh rates.
+    let remaining=Math.min(dt,0.1,game.time);
+    while(remaining>0.000001){
+      const step=Math.min(remaining,1/120), player=game.player;
+      game.difficulty=1+Math.floor((ROUND_SECONDS-game.time)/15);
+      game.shake=Math.max(0,game.shake-step);
+      if(Math.random()<1-Math.exp(-0.12*game.difficulty*step)){
+        game.shake=0.7; game.events.push({txt:'🚜 Traktor-rystelse!',t:1.1}); beep('sawtooth',110,0.2);
+      }
+      const direction=Number(game.input.right)-Number(game.input.left);
+      const target=direction*Math.min(560,380+profile.upgrades.speed*35), response=direction?18:22;
+      const decay=Math.exp(-response*step), previousVelocity=player.vx;
+      player.vx=target+(previousVelocity-target)*decay;
+      player.x+=target*step+(previousVelocity-target)*(1-decay)/response;
+      if(player.x<field.left){player.x=field.left;player.vx=Math.max(0,player.vx);}
+      if(player.x>field.right){player.x=field.right;player.vx=Math.min(0,player.vx);}
+      player.hitCooldown=Math.max(0,player.hitCooldown-step); player.hurt=Math.max(0,player.hurt-step);
+      player.shield=Math.max(0,player.shield-step); player.magnet=Math.max(0,player.magnet-step);
+      const landingDelay=timeUntilLanding(player,field);
+      if(landingDelay<=step && (player.vy>=0 || player.y<field.floorY-player.r)){
+        landPlayer(profile,field,game.simTime+landingDelay);
+        const rest=step-landingDelay;
+        player.y+=player.vy*rest+490*rest*rest; player.vy+=980*rest;
+      }else{
+        player.y+=player.vy*step+490*step*step; player.vy+=980*step;
+      }
+      if(player.y<field.top){player.y=field.top;player.vy=Math.max(0,player.vy);}
+      player.y=Math.min(player.y,field.floorY-player.r);
+      player.air+=step; player.anim+=step; game.simTime+=step;
+      spawnAndMove(step); handleCollisions(profile,field.floorY,step);
+      game.popups=game.popups.filter(p=>(p.t-=step)>0); game.events=game.events.filter(e=>(e.t-=step)>0);
+      addScore(step*(7+player.combo*1.1)*game.difficulty);
+      game.time=Math.max(0,game.time-step); remaining-=step;
+    }
+    if(game.time<=0.000001){game.time=0;finishRound();}
+  }
+
+  function spawnAndMove(dt){
+    const sp=game.spawnTimers,field=getPlayfield();
+    const randomX=()=>field.left+Math.random()*(field.right-field.left);
+    const randomY=(minimum=110)=>minimum+Math.random()*Math.max(0,field.floorY-45-minimum);
+    sp.coin-=dt;sp.power-=dt;sp.obs-=dt;sp.fries-=dt;sp.balloon-=dt;sp.plate-=dt;
+    if(sp.coin<=0){
+      const height=randomY(Math.max(field.top,115));
+      game.coins.push({x:randomX(),y:height,r:10,bonus:height<240});
+      sp.coin=Math.max(0.18,0.5-game.difficulty*0.05);
+    }
+    if(sp.power<=0){
+      const types=['shield','magnet'];
+      game.powerups.push({x:randomX(),y:randomY(140),r:12,type:types[(Math.random()*types.length)|0]});
+      sp.power=6-Math.min(2.2,game.difficulty*0.5);
+    }
+    if(sp.obs<=0){
+      const direction=Math.random()<0.5?1:-1;
+      game.obstacles.push({type:'sausage',x:direction>0?-45:canvas.width+45,y:randomY(180),vx:direction*(130+game.difficulty*42),r:24,rot:0});
+      sp.obs=Math.max(0.6,1.7-game.difficulty*0.18);
+    }
+    if(sp.plate<=0 && game.difficulty>=2){
+      const direction=Math.random()<0.5?1:-1;
+      game.obstacles.push({type:'plate',x:direction>0?-50:canvas.width+50,y:randomY(120),vx:direction*(230+game.difficulty*45),r:24,rot:0});
+      sp.plate=Math.max(0.7,1.8-game.difficulty*0.14);
+    }
+    if(sp.fries<=0){
+      game.obstacles.push({type:'fries',x:randomX(),y:-25,vy:170+game.difficulty*65,r:14});
+      sp.fries=Math.max(0.45,1.2-game.difficulty*0.11);
+    }
+    if(sp.balloon<=0){
+      const direction=Math.random()<0.5?1:-1;
+      game.obstacles.push({type:'balloon',x:direction>0?-25:canvas.width+25,y:randomY(100),vx:direction*(90+game.difficulty*22),r:16});
+      sp.balloon=Math.max(0.85,2.4-game.difficulty*0.2);
+    }
+    game.obstacles.forEach(o=>{
+      if(o.type==='fries')o.y+=o.vy*dt;
+      else{o.x+=o.vx*dt;if(o.type==='plate')o.rot+=dt*6*Math.sign(o.vx);if(o.type==='sausage')o.rot+=dt*1.2*Math.sign(o.vx);}
+    });
+    game.obstacles=game.obstacles.filter(o=>o.x>-120&&o.x<canvas.width+120&&o.y<canvas.height+80);
+  }
+  function handleCollisions(profile,floorY,dt=1/60){
+    const player=game.player,magnetRadius=profile.upgrades.magnet*24+(player.magnet>0?135:0);
+    game.coins=game.coins.filter(coin=>{
+      const dx=coin.x-player.x,dy=coin.y-player.y,distance=Math.hypot(dx,dy);
+      if(distance<magnetRadius&&distance>1){const travel=Math.min(distance,180*dt);coin.x-=dx/distance*travel;coin.y-=dy/distance*travel;}
+      if(Math.hypot(coin.x-player.x,coin.y-player.y)<player.r+coin.r){
+        game.roundCoins++;const heightBonus=Math.max(0,Math.floor((floorY-player.y)*0.08));
+        addScore((coin.bonus?50:25)+heightBonus,'Mønt!');return false;
+      }
+      return true;
+    });
+    game.powerups=game.powerups.filter(power=>{
+      if(Math.hypot(power.x-player.x,power.y-player.y)<player.r+power.r){
+        if(power.type==='shield')player.shield=5+profile.upgrades.shield*0.8;
+        if(power.type==='magnet')player.magnet=8;
+        addScore(80,power.type==='shield'?'Skjold!':'Magnet!');return false;
+      }
+      return true;
+    });
+    game.obstacles=game.obstacles.filter(obstacle=>{
+      if(Math.hypot(obstacle.x-player.x,obstacle.y-player.y)>=player.r+obstacle.r)return true;
+      // Consume each contact, including contacts during recovery, to prevent repeated frame damage.
+      if(player.hitCooldown>0)return false;
+      if(player.shield>0){
+        player.shield=0;player.hitCooldown=0.2;addScore(35,'Skjold reddede dig!');return false;
+      }
+      addScore(obstacle.type==='sausage'||obstacle.type==='plate'?-30:-20,'AV!');
+      player.combo=0;player.bouncePower=1;player.pendingJumpAt=null;
+      player.vy=Math.max(player.vy,620);player.hitCooldown=0.7;player.hurt=0.65;
+      player.vx+=(player.x>=obstacle.x?130:-130)/Math.max(1,profile.upgrades.balance*0.8);
+      beep('sawtooth',160,0.1);return false;
+    });
+  }
+
+  function finishRound(){
+    const profile=getPlayer();game.score=Math.round(game.score);
+    profile.gamesPlayed++;profile.coins+=game.roundCoins;
+    if(game.score>profile.highScore)profile.highScore=game.score;
+    const result={name:profile.name,score:game.score,date:new Date().toISOString(),playerId:profile.id};
+    game.leaderboard.push(result);game.leaderboard.sort((a,b)=>b.score-a.score);
+    const rank=game.leaderboard.indexOf(result)+1;game.leaderboard=game.leaderboard.slice(0,100);
+    game.lastResult={score:game.score,coinsEarned:game.roundCoins,highScore:profile.highScore,rank};
+    game.input.left=false;game.input.right=false;game.input.jump=false;game.input.jumpPressed=false;
+    save();setState(GAME_STATES.RESULTS);
+  }
+
+  function drawPlayer(pl,p){
+    const isJumping = getPlayfield().floorY-(pl.y+pl.r)>24;
+    const spriteName = p.avatar === 'pige' ? (isJumping ? 'girlJump' : 'girlIdle') : (isJumping ? 'boyJump' : 'boyIdle');
+    const spriteWidth = pl.spriteWidth;
+    const spriteHeight = pl.spriteHeight;
+    const drawX = pl.x - spriteWidth / 2;
+    const drawY = pl.y + pl.r - spriteHeight;
+    ctx.fillStyle='rgba(31,41,55,.18)';ctx.beginPath();ctx.ellipse(pl.x,getPlayfield().floorY+2,18,4,0,0,Math.PI*2);ctx.fill();
+    drawAsset(spriteName, drawX, drawY, spriteWidth, spriteHeight, () => {
+      ctx.fillStyle=p.avatar==='pige'?'#f9a8d4':'#93c5fd';
+      ctx.fillRect(drawX + 12,drawY + 24,28,36);
+      ctx.fillStyle='#fcd7b6';
+      ctx.beginPath(); ctx.arc(pl.x,drawY + 14,13,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle='#334155';ctx.fillRect(drawX+12,drawY+60,12,12);ctx.fillRect(drawX+28,drawY+60,12,12);
+    },1);
+    if(pl.shield>0){ctx.strokeStyle='rgba(96,165,250,.7)';ctx.lineWidth=4;ctx.beginPath();ctx.arc(pl.x,pl.y,34,0,Math.PI*2);ctx.stroke();}
+    if(pl.hurt>0){const y=Math.max(28,drawY-12);ctx.fillStyle='#fff';ctx.strokeStyle='#dc2626';ctx.lineWidth=3;ctx.beginPath();ctx.roundRect(pl.x-31,y-29,62,35,12);ctx.fill();ctx.stroke();ctx.fillStyle='#b91c1c';ctx.font='bold 24px sans-serif';ctx.textAlign='center';ctx.fillText('AV!',pl.x,y-3);ctx.textAlign='start';}
+  }
+
+  function draw(){const s=game.shake>0?6:0,ox=s?Math.sin(performance.now()*0.03)*s:0,oy=s?Math.cos(performance.now()*0.028)*s:0; ctx.save(); ctx.translate(ox,oy); ctx.clearRect(-20,-20,canvas.width+40,canvas.height+40);
+    const grad=ctx.createLinearGradient(0,0,0,720); grad.addColorStop(0,'#8be9ff'); grad.addColorStop(1,'#fef9c3'); ctx.fillStyle=grad; ctx.fillRect(0,0,1200,720); drawClouds(); drawCastle();
+    if(game.state===GAME_STATES.PLAYING) drawPlaying(); else drawScreenTitle(); ctx.restore();}
+  function drawScreenTitle(){ctx.fillStyle='rgba(0,0,0,.2)';ctx.fillRect(0,0,1200,720); drawAsset('logo',140,120,920,255,()=>{ctx.fillStyle='#fff';ctx.font='bold 72px Trebuchet MS';ctx.fillText('Aulum Byfest',320,260);}); ctx.fillStyle='#fff';ctx.font='bold 58px Trebuchet MS';ctx.fillText('Hoppeborg Challenge',315,465);}
+  function drawClouds(){ctx.fillStyle='rgba(255,255,255,.8)'; for(let i=0;i<7;i++){const x=(performance.now()*0.01*(i+1)+i*190)%1280-90,y=55+i*23;ctx.beginPath();ctx.arc(x,y,24,0,Math.PI*2);ctx.arc(x+24,y+3,20,0,Math.PI*2);ctx.arc(x-24,y+4,18,0,Math.PI*2);ctx.fill();}}
+  function drawCastle(){const r=getCastleRect(),f=getPlayfield();drawAsset('castle',r.x,r.y,r.w,r.h,()=>{ctx.fillStyle='#f97316';ctx.fillRect(r.x,f.floorY,r.w,100);ctx.fillStyle='#fb7185';ctx.fillRect(r.x,f.floorY,r.w,22);for(const x of [r.x,r.x+r.w-80]){ctx.fillStyle='#facc15';ctx.fillRect(x,f.floorY-230,80,230);ctx.fillStyle='#ef4444';ctx.beginPath();ctx.arc(x+40,f.floorY-230,45,Math.PI,0);ctx.fill();}});if(game.state!==GAME_STATES.PLAYING)drawAsset('logo',22,14,240,66,()=>{});}
+  function drawPlaying(){const pl=game.player,p=getPlayer();
+    game.coins.forEach(c=>{drawAsset('coin',c.x-19,c.y-19,38,38,()=>{ctx.fillStyle=c.bonus?'#f97316':'#facc15';ctx.beginPath();ctx.arc(c.x,c.y,c.r,0,Math.PI*2);ctx.fill();});});
+    game.powerups.forEach(pw=>{ctx.fillStyle={shield:'#22c55e',magnet:'#3b82f6'}[pw.type];ctx.beginPath();ctx.arc(pw.x,pw.y,pw.r,0,Math.PI*2);ctx.fill();});
+    game.obstacles.forEach(o=>{
+      if(o.type==='sausage'){ctx.save();ctx.translate(o.x,o.y);ctx.rotate(0.12*Math.sign(o.vx));drawAsset('sausage',-40,-22,80,45,()=>{ctx.fillStyle='#b45309';ctx.beginPath();ctx.ellipse(0,0,22,11,0,0,Math.PI*2);ctx.fill();});ctx.restore();}
+      if(o.type==='plate'){ctx.save();ctx.translate(o.x,o.y);ctx.rotate(o.rot||0);drawAsset('plate',-35,-35,70,70,()=>{ctx.strokeStyle='#6b7280';ctx.lineWidth=4;ctx.beginPath();ctx.arc(0,0,24,0,Math.PI*2);ctx.stroke();});ctx.restore();}
+      if(o.type==='fries'){ctx.fillStyle='#f59e0b';ctx.fillRect(o.x-8,o.y-16,16,18);ctx.fillStyle='#fde68a';for(let i=0;i<4;i++)ctx.fillRect(o.x-7+i*4,o.y-24,3,9);}
+      if(o.type==='balloon'){ctx.fillStyle='#ec4899';ctx.beginPath();ctx.arc(o.x,o.y,o.r,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#7c3aed';ctx.beginPath();ctx.moveTo(o.x,o.y+o.r);ctx.lineTo(o.x,o.y+o.r+16);ctx.stroke();}
+    });
+    drawPlayer(pl,p);
+    game.popups.forEach(pp=>{ctx.fillStyle='#111827';ctx.font='bold 20px sans-serif';ctx.fillText(pp.txt,pp.x-40,pp.y-(1-pp.t)*25);});
+    const meterW=270,comboFill=Math.min(1,pl.combo/12),bounceFill=Math.min(1,(pl.bouncePower-1)/3.2); ctx.fillStyle='rgba(17,24,39,.8)'; ctx.fillRect(20,20,meterW,24); ctx.fillStyle='#22c55e';ctx.fillRect(20,20,meterW*comboFill,24); ctx.fillStyle='#fff';ctx.font='bold 14px sans-serif';ctx.fillText(`Combo: ${pl.combo}`,28,37);
+    ctx.fillStyle='rgba(17,24,39,.8)'; ctx.fillRect(20,50,meterW,20); ctx.fillStyle='#f97316';ctx.fillRect(20,50,meterW*bounceFill,20); ctx.fillStyle='#fff';ctx.fillText('Hop-meter',28,64);
+    ctx.fillStyle='rgba(255,255,255,.9)';ctx.fillRect(16,80,920,38);ctx.fillStyle='#111827';ctx.font='bold 25px Trebuchet MS';ctx.fillText(`Tid: ${Math.ceil(game.time)}  Score: ${Math.round(game.score)}  Mønter: ${game.roundCoins}  Niveau: ${game.difficulty}`,24,107);
+    const landingIn=timeUntilLanding(pl,getPlayfield()),windows=timingWindows(p);
+    const ready=pl.vy>0&&landingIn<=windows.good&&pl.hurt<=0;byId('hopButton').dataset.ready=String(ready);byId('hopButton').textContent=ready?'HOP NU!':'HOP ↑';
+    ctx.fillStyle=landingIn<=windows.perfect?'#16a34a':'#334155';ctx.font='bold 22px sans-serif';ctx.textAlign='center';ctx.fillText(pl.vy>0&&landingIn<=windows.good?'TRYK HOP NU!':'Tryk HOP lige før fødderne lander',600,697);ctx.textAlign='start';
+    if(byId('roundScore')){byId('roundScore').textContent=Math.round(game.score);byId('roundTime').textContent=Math.max(0,Math.ceil(game.time));byId('roundCombo').textContent=pl.combo;}
+    game.events.forEach((e,i)=>{ctx.fillStyle='#dc2626';ctx.font='bold 24px sans-serif';ctx.fillText(e.txt,420,52+i*28);});
+  }
+
+  function loop(ts){if(!loop.last)loop.last=ts;const dt=Math.min(0.1,(ts-loop.last)/1000);loop.last=ts;if(!document.hidden)update(dt);draw();requestAnimationFrame(loop)} requestAnimationFrame(loop);
+  const inputSources={left:new Set(),right:new Set(),jump:new Set()};
+  function resetInput(){for(const sources of Object.values(inputSources))sources.clear();game.input.left=game.input.right=game.input.jump=game.input.jumpPressed=false;if(game.player)game.player.pendingJumpAt=null;}
+  function setControl(control,source,down){const was=game.input[control];if(down)inputSources[control].add(source);else inputSources[control].delete(source);game.input[control]=inputSources[control].size>0;if(control==='jump'&&!was&&game.input.jump)game.input.jumpPressed=true;}
+  const keyControl=key=>({'ArrowLeft':'left',a:'left',A:'left','ArrowRight':'right',d:'right',D:'right',' ':'jump',ArrowUp:'jump'}[key]);
+  addEventListener('keydown',e=>{const control=keyControl(e.key);if(!control||game.state!==GAME_STATES.PLAYING||/^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName)||e.ctrlKey||e.metaKey||e.altKey)return;e.preventDefault();if(!e.repeat)setControl(control,e.code||e.key.toLowerCase(),true);unlockAudio();});
+  addEventListener('keyup',e=>{const control=keyControl(e.key);if(control)setControl(control,e.code||e.key.toLowerCase(),false);});
+  addEventListener('blur',resetInput);
+  document.addEventListener('visibilitychange',()=>{resetInput();loop.last=0;});
+  document.getElementById('touchControls').querySelectorAll('[data-control]').forEach(button=>{
+    button.addEventListener('pointerdown',e=>{if(game.state!==GAME_STATES.PLAYING)return;e.preventDefault();button.setPointerCapture(e.pointerId);setControl(button.dataset.control,'pointer'+e.pointerId,true);unlockAudio();});
+    for(const event of ['pointerup','pointercancel','lostpointercapture'])button.addEventListener(event,e=>setControl(button.dataset.control,'pointer'+e.pointerId,false));
+    button.addEventListener('keydown',e=>{if(e.key===' '||e.key==='Enter'){e.preventDefault();e.stopPropagation();if(!e.repeat)setControl(button.dataset.control,'button',true);}});
+    button.addEventListener('keyup',e=>{if(e.key===' '||e.key==='Enter'){e.preventDefault();setControl(button.dataset.control,'button',false);}});
+    button.addEventListener('blur',()=>setControl(button.dataset.control,'button',false));
+  });
+  document.addEventListener('pointerdown',unlockAudio,{once:true});
+  renderUI();
+})();
+</script>
+</body>
+</html>
